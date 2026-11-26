@@ -2,6 +2,8 @@ import sys
 import pwseqdist as pw
 from tcrdist.repertoire import TCRrep
 from tcrdist.rep_diff import neighborhood_diff
+from tcrdist.rep_diff import hcluster_diff, member_summ
+from hierdiff import plot_hclust_props
 import argparse
 import pathlib
 import pandas
@@ -10,6 +12,11 @@ import typing
 import numpy as np
 import pandas
 import dill # extension of pickle, but also allows you to save interpretor sessions if needed
+
+# depending on pandas version this will fix version errors with series using .iteritems methos vs .items method
+if not hasattr(pandas.Series, "iteritems"):
+    pandas.Series.iteritems = pandas.Series.items
+
 
 '''
 DISTANCE METRICS DICTIONARY FOR ALPHA AND BETA CHAINS
@@ -337,6 +344,72 @@ def differential_neighbors(clones_df:pandas.DataFrame, distance_mtx:numpy.ndarra
         nn_abundance.to_csv(f"{save_prefix}_radii_{radius}_{test_method}_by_cell_abundance.csv", index = False)
 
 
+def hierarchical_clustering(clones_df:pandas.DataFrame, distance_mtx:numpy.ndarray, test_method:str, save_prefix:pathlib.Path) -> None:
+    stats_method = {"fishers":"Fischer's Exact test",
+                    "chi2": "Chi-squared test",
+                    "chm": "Cochran-Mantel-Haenszel test"}
+
+    print(f"Comparing differential clusters by subject as defined by hierarchical clustering using {stats_method[test_method]}...", flush = True)
+
+    clones_df["count_unique"]=1 # creates column that doesn't use the abundance of clones at the cell level, rather just occurences of unique clonotypes per sample
+
+    res, Z= hcluster_diff(
+                clones_df,
+                distance_mtx,
+                x_cols = ['subject'],
+                count_col = 'count_unique',
+                hclust_method = 'complete',
+                test_method = test_method) # performs hierarchical clustering on TCR distances (note not dependent on the fixed radii neighborhoods calculated before)
+
+    res_summary = member_summ(
+                res_df = res,
+                clone_df = clones_df,
+                addl_cols=['subject']) # summarizes cluster meta data such as the % of TCRs with a given V gene based on the hierarchical clusters made
+
+    res_detailed = pandas.concat([res, res_summary], axis=1) # mergeds hierarchical cluster data with the summary metadata
+
+    interactive_hierarchical_html = plot_hclust_props(Z,
+            title='hierarchical clustering based on unique clonotypes (i.e. clonotype is only considered once per sample, if it exists - drops all clonal expansions)',
+            res=res_detailed,
+            tooltip_cols=res_detailed.filter(regex = "cdr3_.*aa|v_.*gene|j_.*_gene").columns.to_list() + ['subject'],
+            alpha=0.00001, colors = ['blue','gray'],
+            alpha_col='pvalue')
+
+    with open(f'{save_prefix}_hierClust_diff_by_unique_clonotypes.html', 'w') as html_file:
+        html_file.write(interactive_hierarchical_html)
+
+    # save csv file matching the html hierarchical cluster html
+    res_detailed.to_csv(f'{save_prefix}_hierClust_diff_by_unique_clonotypes.csv', index = False)
+
+    # hierachical clustering based on abundance (i.e. includes clonal expansions, cell sampling depth is not normalized)
+    res, Z= hcluster_diff(
+                clones_df,
+                distance_mtx,
+                x_cols = ['subject'],
+                count_col = 'count',
+                hclust_method = 'complete',
+                test_method = test_method) # performs hierarchical clustering on TCR distances (note not dependent on the fixed radii neighborhoods calculated before)
+
+    res_summary = member_summ(
+                res_df = res,
+                clone_df = clones_df,
+                addl_cols=['subject']) # summarizes cluster meta data such as the % of TCRs with a given V gene based on the hierarchical clusters made
+
+    res_detailed = pandas.concat([res, res_summary], axis=1) # mergeds hierarchical cluster data with the summary metadata
+
+    interactive_hierarchical_html = plot_hclust_props(Z,
+            title='hierarchical clustering based on cell abundance in clonotype (i.e. clonal expansions are included and may bias results)',
+            res=res_detailed,
+            tooltip_cols=res_detailed.filter(regex = "cdr3_.*aa|v_.*gene|j_.*_gene").columns.to_list() + ['subject'],
+            alpha=0.00001, colors = ['blue','gray'],
+            alpha_col='pvalue')
+
+    with open(f'{save_prefix}_hierClust_diff_by_cell_abundance_per_clonotype.html', 'w') as html_file:
+        html_file.write(interactive_hierarchical_html)
+
+    # save csv file matching the html hierarchical cluster html
+    res_detailed.to_csv(f'{save_prefix}_hierClust_diff_by_cell_abundance_per_clonotype.csv', index = False)
+
 ######################################################################
 ############################ DEFINE PARSER ###########################
 ######################################################################
@@ -423,8 +496,12 @@ all_subjects = tcrdist_obj.clone_df["subject"].to_numpy() # generate the total u
 summary_stats_df = summarize_neighborhoods_based_on_radii(distance_mtx = distance_matrix, radii = args.test_radii, all_subjects = all_subjects, save_prefix = args.save_file)
 
 
-# differntial comparison neighbors
+# differntial comparison based on fixed neighbors radii
 differential_neighbors(clones_df = tcrdist_obj.clone_df, distance_mtx = distance_matrix, radii = args.test_radii, test_method = args.test_method, save_prefix = args.save_file)
+
+# differential comparison based on hierarchical clustering
+hierarchical_clustering(clones_df = tcrdist_obj.clone_df, distance_mtx = distance_matrix, test_method = args.test_method, save_prefix = args.save_file)
+
 
 # save generated clones df
 tcrdist_obj.clone_df.to_csv(f"{args.save_file}_tcrdist_clones_output.csv", index = False)
