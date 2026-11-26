@@ -1,6 +1,7 @@
 import sys
 import pwseqdist as pw
 from tcrdist.repertoire import TCRrep
+from tcrdist.rep_diff import neighborhood_diff
 import argparse
 import pathlib
 import pandas
@@ -305,7 +306,11 @@ enrichment, pvalues, FDR is based on a Fisher's Exact Test if 2x2 or Chi-squared
 '''
 
 def differential_neighbors(clones_df:pandas.DataFrame, distance_mtx:numpy.ndarray, radii:list, test_method:str, save_prefix:pathlib.Path) -> None:
-    print("Compariing differential neighbors by subject using Fisher's Exact test...", flush = True)
+    stats_method = {"fishers":"Fischer's Exact test",
+                    "chi2": "Chi-squared test",
+                    "chm": "Cochran-Mantel-Haenszel test"}
+
+    print(f"Comparing differential neighbors by subject using {stats_method[test_method]}...", flush = True)
 
     clones_df["count_unique"]=1
 
@@ -328,7 +333,7 @@ def differential_neighbors(clones_df:pandas.DataFrame, distance_mtx:numpy.ndarra
                 test_method = test_method,
                 knn_radius=radius)
 
-        nn_unique.to_csv(f"{save_prefix}_radii_{radius}_{test_method}_by_unique_clontypes.csv", index = False)
+        nn_unique.to_csv(f"{save_prefix}_radii_{radius}_{test_method}_by_unique_clonotypes.csv", index = False)
         nn_abundance.to_csv(f"{save_prefix}_radii_{radius}_{test_method}_by_cell_abundance.csv", index = False)
 
 
@@ -422,6 +427,6 @@ summary_stats_df = summarize_neighborhoods_based_on_radii(distance_mtx = distanc
 differential_neighbors(clones_df = tcrdist_obj.clone_df, distance_mtx = distance_matrix, radii = args.test_radii, test_method = args.test_method, save_prefix = args.save_file)
 
 # save generated clones df
-tcrdist_obj.clone_df.to_csv("{args.save_file}_tcrdist_clones_output.csv")
+tcrdist_obj.clone_df.to_csv(f"{args.save_file}_tcrdist_clones_output.csv", index = False)
 
 #tcrdist_obj = dill.load(open("yourfile.dill", mode='rb')) # example of how to load it in; saving this code for use later
